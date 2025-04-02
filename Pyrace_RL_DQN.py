@@ -57,6 +57,14 @@ class DQNAgent:
         
         # For statistics
         self.training_count = 0
+        
+        # Additional diagnostics
+        self.loss_history = []
+        self.q_values_stats = []
+        self.action_counts = np.zeros(action_size)
+        self.state_visits = {}  # Will store as string keys for state tuples
+        self.episode_rewards = []
+        self.episode_lengths = []
 
     def _build_model(self):
         # Neural Network for Deep-Q learning Model
@@ -78,11 +86,20 @@ class DQNAgent:
     def act(self, state, explore_rate=0.0):
         # Epsilon-greedy action selection
         if np.random.rand() <= explore_rate:
-            return random.randrange(self.action_size)
+            action = random.randrange(self.action_size)
+        else:
+            state_tensor = np.array(state).reshape(1, self.state_size)
+            act_values = self.model.predict(state_tensor, verbose=0)
+            action = np.argmax(act_values[0])
         
-        state_tensor = np.array(state).reshape(1, self.state_size)
-        act_values = self.model.predict(state_tensor, verbose=0)
-        return np.argmax(act_values[0])
+        # Track action selection
+        self.action_counts[action] += 1
+        
+        # Track state visitation (rounded to 2 decimals for discretization)
+        state_key = tuple(np.round(state, 2))
+        self.state_visits[state_key] = self.state_visits.get(state_key, 0) + 1
+        
+        return action
 
     def replay(self, batch_size):
         # Train the model with randomly sampled batch from memory
@@ -103,19 +120,114 @@ class DQNAgent:
         targets = self.model.predict(states_tensor, verbose=0)
         next_q_values = self.target_model.predict(next_states_tensor, verbose=0)
         
+        # Track Q-value statistics before update
+        self.q_values_stats.append({
+            'mean': float(np.mean(next_q_values)),
+            'max': float(np.max(next_q_values)),
+            'min': float(np.min(next_q_values))
+        })
+        
         for i in range(batch_size):
             if dones[i]:
                 targets[i][actions[i]] = rewards[i]
             else:
                 targets[i][actions[i]] = rewards[i] + GAMMA * np.amax(next_q_values[i])
         
-        # Train the model
-        self.model.fit(states_tensor, targets, epochs=1, verbose=0)
+        # Train the model and track loss
+        history = self.model.fit(states_tensor, targets, epochs=1, verbose=0)
+        self.loss_history.append(float(history.history['loss'][0]))
         self.training_count += 1
         
         # Decay epsilon
         if self.epsilon > EPSILON_MIN:
             self.epsilon *= EPSILON_DECAY
+
+    def analyze_diagnostics(self):
+        """Analyze the collected diagnostic information"""
+        print("\n=== DQN Agent Diagnostics ===")
+        
+        # Loss analysis
+        if self.loss_history:
+            print("\nLoss Statistics:")
+            print(f"Mean Loss: {np.mean(self.loss_history):.4f}")
+            print(f"Min Loss: {np.min(self.loss_history):.4f}")
+            print(f"Max Loss: {np.max(self.loss_history):.4f}")
+        
+        # Q-value analysis
+        if self.q_values_stats:
+            means = [stat['mean'] for stat in self.q_values_stats]
+            maxes = [stat['max'] for stat in self.q_values_stats]
+            mins = [stat['min'] for stat in self.q_values_stats]
+            
+            print("\nQ-value Statistics:")
+            print(f"Mean Q-value: {np.mean(means):.4f}")
+            print(f"Max Q-value: {np.max(maxes):.4f}")
+            print(f"Min Q-value: {np.min(mins):.4f}")
+        
+        # Action distribution
+        total_actions = np.sum(self.action_counts)
+        if total_actions > 0:
+            print("\nAction Distribution:")
+            for i in range(self.action_size):
+                percentage = (self.action_counts[i] / total_actions) * 100
+                print(f"Action {i}: {percentage:.1f}%")
+        
+        # State visitation analysis
+        if self.state_visits:
+            print("\nState Visitation:")
+            most_visited = sorted(self.state_visits.items(), key=lambda x: x[1], reverse=True)[:5]
+            print("Top 5 most visited states:")
+            for state, count in most_visited:
+                print(f"State {state}: visited {count} times")
+        
+        # Plot diagnostics if matplotlib is available
+        try:
+            plt.figure(figsize=(15, 5))
+            
+            # Loss plot
+            plt.subplot(131)
+            plt.plot(self.loss_history)
+            plt.title('Training Loss')
+            plt.xlabel('Training Steps')
+            plt.ylabel('Loss')
+            
+            # Q-value plot
+            plt.subplot(132)
+            plt.plot([stat['mean'] for stat in self.q_values_stats], label='Mean Q')
+            plt.plot([stat['max'] for stat in self.q_values_stats], label='Max Q')
+            plt.plot([stat['min'] for stat in self.q_values_stats], label='Min Q')
+            plt.title('Q-value Evolution')
+            plt.xlabel('Training Steps')
+            plt.ylabel('Q-value')
+            plt.legend()
+            
+            # Action distribution
+            plt.subplot(133)
+            plt.bar(range(self.action_size), self.action_counts)
+            plt.title('Action Distribution')
+            plt.xlabel('Action')
+            plt.ylabel('Count')
+            
+            plt.tight_layout()
+            plt.show()
+            
+        except Exception as e:
+            print(f"Could not create plots: {e}")
+            
+        return {
+            'loss_stats': {
+                'mean': np.mean(self.loss_history) if self.loss_history else None,
+                'min': np.min(self.loss_history) if self.loss_history else None,
+                'max': np.max(self.loss_history) if self.loss_history else None
+            },
+            'q_value_stats': {
+                'mean': np.mean(means) if self.q_values_stats else None,
+                'min': np.min(mins) if self.q_values_stats else None,
+                'max': np.max(maxes) if self.q_values_stats else None
+            },
+            'action_distribution': self.action_counts.tolist(),
+            'most_visited_states': most_visited if self.state_visits else None
+        }
 
 def simulate(learning=True, episode_start=0):
     global agent
@@ -213,12 +325,21 @@ def load_and_play(episode, learning=False):
         agent.model = loaded_model
         agent.update_target_model()
         print(f"Model loaded from {model_path}")
+        
+        # Run diagnostics before simulation
+        print("\nInitial Model Diagnostics:")
+        agent.analyze_diagnostics()
+        
     except Exception as e:
         print(f"Error loading model: {e}")
         return
     
     # Play game
     simulate(learning, episode)
+    
+    # Run diagnostics after simulation
+    print("\nPost-Simulation Diagnostics:")
+    agent.analyze_diagnostics()
 
 if __name__ == "__main__":
     env = gym.make("Pyrace-v1").unwrapped  # skip the TimeLimit and OrderEnforcing default wrappers
