@@ -2,14 +2,17 @@ import sys, os
 import math, random
 import numpy as np
 import matplotlib
+
+from gym_race.envs.pyrace_2d import PyRace2D
 matplotlib.use('Agg')  # to avoid some "memory" errors with TkAgg backend
 import matplotlib.pyplot as plt
 import argparse
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, LeakyReLU
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import Huber
 from collections import deque
 
 import gymnasium as gym
@@ -26,19 +29,19 @@ register(
 VERSION_NAME = 'DQN_v01'  # the name for our model
 
 # DQN Hyperparameters
-MEMORY_SIZE = 10000  # size of replay buffer
+MEMORY_SIZE = 50000  # Increased replay buffer for better learning
 GAMMA = 0.99  # discount factor
 EPSILON_START = 1.0  # initial exploration rate
 EPSILON_MIN = 0.05  # minimum exploration rate
-EPSILON_DECAY = 0.997  # decay rate for exploration
-BATCH_SIZE = 64  # batch size for training
+EPSILON_DECAY = 0.997  # slower decay for better exploration
+BATCH_SIZE = 128  # increased batch size for Metal GPU
 LEARNING_RATE = 0.0005  # learning rate for the optimizer
 UPDATE_TARGET_EVERY = 5  # how often to update target network (in episodes)
 MAX_T = 2000  # maximum timesteps per episode
 
 # Training parameters (will be updated by command line arguments)
 DISPLAY_EPISODES = 100  # display live game every...
-REPORT_EPISODES = 500  # report (plot) every...
+REPORT_EPISODES = 250  # report (plot) every... (reduced for more frequent updates)
 NUM_EPISODES = 35000  # number of episodes to train
 
 def parse_arguments():
@@ -54,6 +57,8 @@ def parse_arguments():
                        help='Display game every N episodes')
     parser.add_argument('--report-every', type=int, default=500,
                        help='Save model and plot every N episodes')
+    parser.add_argument('--no-render', action='store_true',
+                       help='Disable rendering for faster training')
     return parser.parse_args()
 
 class DQNAgent:
@@ -87,11 +92,13 @@ class DQNAgent:
 
     def _build_model(self):
         model = Sequential([
-            Dense(64, input_dim=self.state_size, activation='LeakyReLU'),  # Larger first layer
-            Dense(32, activation='LeakyReLU'),  # LeakyReLU for better gradient flow
+            Dense(64, input_dim=self.state_size),  # Remove activation from Dense
+            LeakyReLU(alpha=0.03),                 # Add separate LeakyReLU layer
+            Dense(32),                             # Remove activation from Dense
+            LeakyReLU(alpha=0.03),                 # Add separate LeakyReLU layer
             Dense(self.action_size, activation='linear')
         ])
-        model.compile(loss='huber_loss', optimizer=Adam(learning_rate=LEARNING_RATE))  # Huber loss for stability
+        model.compile(loss=Huber(), optimizer=Adam(learning_rate=LEARNING_RATE))  # Proper Huber loss implementation
         return model
 
     def update_target_model(self):
@@ -251,7 +258,8 @@ class DQNAgent:
 def simulate(learning=True, episode_start=0):
     global agent
     
-    env.set_view(True)
+    # Only set view if not using no-render flag
+    env.set_view(not args.no_render)
     explore_rate = agent.epsilon if learning else 0
     
     total_reward = 0
@@ -301,8 +309,8 @@ def simulate(learning=True, episode_start=0):
             
             total_reward += reward
             
-            # Display game
-            if (episode % DISPLAY_EPISODES == 0) or (env.pyrace.mode == 2):
+            # Display game only if not using no-render flag
+            if not args.no_render and ((episode % DISPLAY_EPISODES == 0) or (env.pyrace.mode == 2)):
                 env.set_msgs(['DQN SIMULATE',
                               f'Episode: {episode}',
                               f'Time steps: {t}',
@@ -372,6 +380,9 @@ if __name__ == "__main__":
     # Initialize environment
     env = gym.make("Pyrace-v1").unwrapped  # skip the TimeLimit and OrderEnforcing default wrappers
     print('env', type(env))
+    
+    # Set rendering based on no-render flag
+    env.set_view(not args.no_render)
     
     if not os.path.exists(f'models_{VERSION_NAME}'):
         os.makedirs(f'models_{VERSION_NAME}')

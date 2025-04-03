@@ -1,5 +1,6 @@
 import pygame
 import math
+import os
 
 screen_width = 1500
 screen_height = 800
@@ -196,7 +197,13 @@ class PyRace2D:
     def __init__(self, is_render = True, car = True, mode = 0):
         # print('PyRace2D - INIT ENVIRONMENT')
         pygame.init()
-        self.screen = pygame.display.set_mode((screen_width, screen_height))
+        if is_render:
+            self.screen = pygame.display.set_mode((screen_width, screen_height))
+        else:
+            # Use dummy video driver for headless mode
+            os.environ["SDL_VIDEODRIVER"] = "dummy"
+            self.screen = pygame.Surface((screen_width, screen_height))
+        
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("Arial", 30)
         self.map = pygame.image.load('race_track_ie.png')
