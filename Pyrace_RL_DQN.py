@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # to avoid some "memory" errors with TkAgg backend
 import matplotlib.pyplot as plt
+import argparse
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
@@ -24,9 +25,6 @@ register(
 """
 VERSION_NAME = 'DQN_v01'  # the name for our model
 
-REPORT_EPISODES = 500  # report (plot) every...
-DISPLAY_EPISODES = 100  # display live game every...
-
 # DQN Hyperparameters
 MEMORY_SIZE = 10000  # size of replay buffer
 GAMMA = 0.99  # discount factor
@@ -36,6 +34,27 @@ EPSILON_DECAY = 0.995  # decay rate for exploration
 BATCH_SIZE = 64  # batch size for training
 LEARNING_RATE = 0.001  # learning rate for the optimizer
 UPDATE_TARGET_EVERY = 5  # how often to update target network (in episodes)
+MAX_T = 2000  # maximum timesteps per episode
+
+# Training parameters (will be updated by command line arguments)
+DISPLAY_EPISODES = 100  # display live game every...
+REPORT_EPISODES = 500  # report (plot) every...
+NUM_EPISODES = 35000  # number of episodes to train
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='DQN Training for Race Environment')
+    parser.add_argument('--mode', type=str, default='train',
+                       choices=['train', 'eval', 'both'],
+                       help='Mode to run the agent: train, eval, or both')
+    parser.add_argument('--checkpoint', type=int, default=3500,
+                       help='Checkpoint episode to load for evaluation')
+    parser.add_argument('--episodes', type=int, default=35000,
+                       help='Number of episodes to train')
+    parser.add_argument('--display-every', type=int, default=100,
+                       help='Display game every N episodes')
+    parser.add_argument('--report-every', type=int, default=500,
+                       help='Save model and plot every N episodes')
+    return parser.parse_args()
 
 class DQNAgent:
     def __init__(self, state_size, action_size):
@@ -67,12 +86,12 @@ class DQNAgent:
         self.episode_lengths = []
 
     def _build_model(self):
-        # Neural Network for Deep-Q learning Model
-        model = Sequential()
-        model.add(Dense(24, input_dim=self.state_size, activation='relu'))
-        model.add(Dense(24, activation='relu'))
-        model.add(Dense(self.action_size, activation='linear'))
-        model.compile(loss='mse', optimizer=Adam(learning_rate=LEARNING_RATE))
+        model = Sequential([
+            Dense(24, input_dim=self.state_size, activation='LeakyReLU'),  # Larger first layer
+            Dense(24, activation='LeakyReLU'),  # LeakyReLU for better gradient flow
+            Dense(self.action_size, activation='linear')
+        ])
+        model.compile(loss='huber_loss', optimizer=Adam(learning_rate=LEARNING_RATE))  # Huber loss for stability
         return model
 
     def update_target_model(self):
@@ -342,6 +361,15 @@ def load_and_play(episode, learning=False):
     agent.analyze_diagnostics()
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # Update global constants based on arguments
+    DISPLAY_EPISODES = args.display_every
+    REPORT_EPISODES = args.report_every
+    NUM_EPISODES = args.episodes
+    
+    # Initialize environment
     env = gym.make("Pyrace-v1").unwrapped  # skip the TimeLimit and OrderEnforcing default wrappers
     print('env', type(env))
     
@@ -356,17 +384,45 @@ if __name__ == "__main__":
     # Initialize DQN agent
     agent = DQNAgent(STATE_SIZE, ACTION_SIZE)
     
-    NUM_EPISODES = 35000  # Extended to allow even more learning
-    MAX_T = 2000
-    
-    # Set to True to train from scratch, False to load a pre-trained model
-    TRAIN_FROM_SCRATCH = False
-    # Set to True to continue training a loaded model, False to just evaluate it
-    CONTINUE_TRAINING = False  # We're now in evaluation mode
-    # Latest episode to load - use your highest available model
-    LATEST_EPISODE = 30000  # Using the latest trained model
-    
-    if TRAIN_FROM_SCRATCH:
+    if args.mode == 'train' or args.mode == 'both':
+        print(f"\nStarting training for {NUM_EPISODES} episodes...")
         simulate(learning=True)
-    else:
-        load_and_play(episode=LATEST_EPISODE, learning=CONTINUE_TRAINING) 
+        
+        # Run diagnostics after training
+        print("\nFinal Training Diagnostics:")
+        agent.analyze_diagnostics()
+    
+    if args.mode == 'eval' or args.mode == 'both':
+        print(f"\nStarting evaluation from checkpoint {args.checkpoint}...")
+        load_and_play(episode=args.checkpoint, learning=False)
+        
+        # Run multiple evaluation episodes
+        total_reward = 0
+        num_eval_episodes = 10
+        
+        print(f"\nRunning {num_eval_episodes} evaluation episodes...")
+        for i in range(num_eval_episodes):
+            obv, _ = env.reset()
+            state = np.array(obv)
+            episode_reward = 0
+            done = False
+            
+            while not done:
+                action = agent.act(state, explore_rate=0.0)  # No exploration during evaluation
+                next_obv, reward, done, _, info = env.step(action)
+                episode_reward += reward
+                state = np.array(next_obv)
+                
+                if args.mode == 'eval':  # Only render if in pure eval mode
+                    env.set_msgs(['EVALUATION',
+                                f'Episode: {i+1}/{num_eval_episodes}',
+                                f'Reward: {episode_reward:.0f}',
+                                f'Checkpoints: {info["check"]}',
+                                f'Distance: {info["dist"]}',
+                                f'Crash: {info["crash"]}'])
+                    env.render()
+            
+            total_reward += episode_reward
+            print(f"Evaluation Episode {i+1}: Reward = {episode_reward:.0f}")
+        
+        print(f"\nAverage Evaluation Reward: {total_reward/num_eval_episodes:.0f}") 

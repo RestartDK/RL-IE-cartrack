@@ -1,0 +1,11 @@
+steps,reward,crash,max_distance,checkpoints,model
+698,-7793.5,True,2205.5,0,DQN
+698,-7793.5,True,2205.5,0,DQN
+698,-7793.5,True,2205.5,0,DQN
+698,-7793.5,True,2205.5,0,DQN
+698,-7793.5,True,2205.5,0,DQN
+889,10000.0,False,4438.5,0,Q-table
+889,10000.0,False,4438.5,0,Q-table
+889,10000.0,False,4438.5,0,Q-table
+889,10000.0,False,4438.5,0,Q-table
+889,10000.0,False,4438.5,0,Q-table

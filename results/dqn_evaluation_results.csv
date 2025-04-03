@@ -1,0 +1,6 @@
+steps,reward,crash,max_distance,checkpoints,episode
+1112,10000,False,4552.0,0,1
+1112,10000,False,4552.0,0,2
+1112,10000,False,4552.0,0,3
+1112,10000,False,4552.0,0,4
+1112,10000,False,4552.0,0,5
