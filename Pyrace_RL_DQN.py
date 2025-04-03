@@ -86,12 +86,12 @@ class DQNAgent:
         self.episode_lengths = []
 
     def _build_model(self):
-        model = Sequential([
-            Dense(24, input_dim=self.state_size, activation='LeakyReLU'),  # Larger first layer
-            Dense(24, activation='LeakyReLU'),  # LeakyReLU for better gradient flow
-            Dense(self.action_size, activation='linear')
-        ])
-        model.compile(loss='huber_loss', optimizer=Adam(learning_rate=LEARNING_RATE))  # Huber loss for stability
+        # Neural Network for Deep-Q learning Model
+        model = Sequential()
+        model.add(Dense(24, input_dim=self.state_size, activation='relu'))
+        model.add(Dense(24, activation='relu'))
+        model.add(Dense(self.action_size, activation='linear'))
+        model.compile(loss='mse', optimizer=Adam(learning_rate=LEARNING_RATE))
         return model
 
     def update_target_model(self):
