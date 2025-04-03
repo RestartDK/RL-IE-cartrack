@@ -82,10 +82,18 @@ Finally, at the end we update the weights of the models and decrease exploration
 
 ### The problem our model keeps encountering
 
-
+- Right now our model is plateauing, it is not exploring new options and whenever and keeps the same reward, no crashes, and same steps
+- There is a lack of exploration / exploitation balance because our epsilon decays too quickly to 0.01 taking the same actions 99% of the time
+- It found one strategy that works and stuck with it, so it got stuck in a local maxima
+- Our neurons are stuck
+- We are using a small network so it might not capturing complex patterns
+- Our standard DQN is overestimating our q-values which leads to an optimistic action selection and stay on the "safe" actions as a result
+- There are only 3 possible discrete actions our model can take. It cannot turn or change its speed well
+- Small replay buffer so it might not maintain alot of different experiences 
 
 ### Potential solutions
 
+Below are some brainstormed solutions we could use based on the questions I raised before:
 - Different inputs
 
 >| Maybe we could change the activation function here? How would it change our model performance?
@@ -102,3 +110,13 @@ Finally, at the end we update the weights of the models and decrease exploration
 - SARSA
 - Double DQN
 - Dueling DQN 
+
+First of all, we could do some hyperparameter tuning. I mentioned before one of the problems was that there is a lack of exploration / exploitation balance. To improve it we can slow down epsilon decay from `0.995` to `0.997`. Then we can increase the minimum epsilon from `0.01` to `0.05`.
+
+Then, to make our learning more stable we could use a Dobule DQN to prevent overestimation. Then we could change from using `MSE` to `Huber loss` which is more robust. Finally, we can reduce the learning rate to avoid missing better solutions and not always taking the "safe" strategy while training. We can reduce it from `0.001` to `0.0005`.
+
+Another potential problem could be that the number of discrete actions in our model is not enough. If we give more actions to our model we could make it more efficient because it would increase the number of possibilities at each given state for our model. The first option will be to introduce a new `BRAKE` action where the car can stop while racing. We could also make the turning continuous instead of discrete with the car angle only increasing or decreasing by 5 but we can test it after. Hence, we will increaase the discrete action space from 3 -> 4.
+
+Finally, to fix our small network problem we can increase our input layer from 24 -> 64, and our activation layer from 24 -> 32. Then, to prevent our dying neurons problem from `ReLU` we can use `LeakyReLU` to prevent this.
+
+>| What would hapen if you change it to a continous action space with turning with +/- 1
