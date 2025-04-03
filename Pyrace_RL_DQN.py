@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # to avoid some "memory" errors with TkAgg backend
 import matplotlib.pyplot as plt
-import argparse
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
@@ -25,6 +24,9 @@ register(
 """
 VERSION_NAME = 'DQN_v01'  # the name for our model
 
+REPORT_EPISODES = 500  # report (plot) every...
+DISPLAY_EPISODES = 100  # display live game every...
+
 # DQN Hyperparameters
 MEMORY_SIZE = 10000  # size of replay buffer
 GAMMA = 0.99  # discount factor
@@ -34,27 +36,6 @@ EPSILON_DECAY = 0.995  # decay rate for exploration
 BATCH_SIZE = 64  # batch size for training
 LEARNING_RATE = 0.001  # learning rate for the optimizer
 UPDATE_TARGET_EVERY = 5  # how often to update target network (in episodes)
-MAX_T = 2000  # maximum timesteps per episode
-
-# Training parameters (will be updated by command line arguments)
-DISPLAY_EPISODES = 100  # display live game every...
-REPORT_EPISODES = 500  # report (plot) every...
-NUM_EPISODES = 35000  # number of episodes to train
-
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='DQN Training for Race Environment')
-    parser.add_argument('--mode', type=str, default='train',
-                       choices=['train', 'eval', 'both'],
-                       help='Mode to run the agent: train, eval, or both')
-    parser.add_argument('--checkpoint', type=int, default=3500,
-                       help='Checkpoint episode to load for evaluation')
-    parser.add_argument('--episodes', type=int, default=35000,
-                       help='Number of episodes to train')
-    parser.add_argument('--display-every', type=int, default=100,
-                       help='Display game every N episodes')
-    parser.add_argument('--report-every', type=int, default=500,
-                       help='Save model and plot every N episodes')
-    return parser.parse_args()
 
 class DQNAgent:
     def __init__(self, state_size, action_size):
@@ -76,14 +57,6 @@ class DQNAgent:
         
         # For statistics
         self.training_count = 0
-        
-        # Additional diagnostics
-        self.loss_history = []
-        self.q_values_stats = []
-        self.action_counts = np.zeros(action_size)
-        self.state_visits = {}  # Will store as string keys for state tuples
-        self.episode_rewards = []
-        self.episode_lengths = []
 
     def _build_model(self):
         # Neural Network for Deep-Q learning Model
@@ -105,20 +78,11 @@ class DQNAgent:
     def act(self, state, explore_rate=0.0):
         # Epsilon-greedy action selection
         if np.random.rand() <= explore_rate:
-            action = random.randrange(self.action_size)
-        else:
-            state_tensor = np.array(state).reshape(1, self.state_size)
-            act_values = self.model.predict(state_tensor, verbose=0)
-            action = np.argmax(act_values[0])
+            return random.randrange(self.action_size)
         
-        # Track action selection
-        self.action_counts[action] += 1
-        
-        # Track state visitation (rounded to 2 decimals for discretization)
-        state_key = tuple(np.round(state, 2))
-        self.state_visits[state_key] = self.state_visits.get(state_key, 0) + 1
-        
-        return action
+        state_tensor = np.array(state).reshape(1, self.state_size)
+        act_values = self.model.predict(state_tensor, verbose=0)
+        return np.argmax(act_values[0])
 
     def replay(self, batch_size):
         # Train the model with randomly sampled batch from memory
@@ -139,114 +103,19 @@ class DQNAgent:
         targets = self.model.predict(states_tensor, verbose=0)
         next_q_values = self.target_model.predict(next_states_tensor, verbose=0)
         
-        # Track Q-value statistics before update
-        self.q_values_stats.append({
-            'mean': float(np.mean(next_q_values)),
-            'max': float(np.max(next_q_values)),
-            'min': float(np.min(next_q_values))
-        })
-        
         for i in range(batch_size):
             if dones[i]:
                 targets[i][actions[i]] = rewards[i]
             else:
                 targets[i][actions[i]] = rewards[i] + GAMMA * np.amax(next_q_values[i])
         
-        # Train the model and track loss
-        history = self.model.fit(states_tensor, targets, epochs=1, verbose=0)
-        self.loss_history.append(float(history.history['loss'][0]))
+        # Train the model
+        self.model.fit(states_tensor, targets, epochs=1, verbose=0)
         self.training_count += 1
         
         # Decay epsilon
         if self.epsilon > EPSILON_MIN:
             self.epsilon *= EPSILON_DECAY
-
-    def analyze_diagnostics(self):
-        """Analyze the collected diagnostic information"""
-        print("\n=== DQN Agent Diagnostics ===")
-        
-        # Loss analysis
-        if self.loss_history:
-            print("\nLoss Statistics:")
-            print(f"Mean Loss: {np.mean(self.loss_history):.4f}")
-            print(f"Min Loss: {np.min(self.loss_history):.4f}")
-            print(f"Max Loss: {np.max(self.loss_history):.4f}")
-        
-        # Q-value analysis
-        if self.q_values_stats:
-            means = [stat['mean'] for stat in self.q_values_stats]
-            maxes = [stat['max'] for stat in self.q_values_stats]
-            mins = [stat['min'] for stat in self.q_values_stats]
-            
-            print("\nQ-value Statistics:")
-            print(f"Mean Q-value: {np.mean(means):.4f}")
-            print(f"Max Q-value: {np.max(maxes):.4f}")
-            print(f"Min Q-value: {np.min(mins):.4f}")
-        
-        # Action distribution
-        total_actions = np.sum(self.action_counts)
-        if total_actions > 0:
-            print("\nAction Distribution:")
-            for i in range(self.action_size):
-                percentage = (self.action_counts[i] / total_actions) * 100
-                print(f"Action {i}: {percentage:.1f}%")
-        
-        # State visitation analysis
-        if self.state_visits:
-            print("\nState Visitation:")
-            most_visited = sorted(self.state_visits.items(), key=lambda x: x[1], reverse=True)[:5]
-            print("Top 5 most visited states:")
-            for state, count in most_visited:
-                print(f"State {state}: visited {count} times")
-        
-        # Plot diagnostics if matplotlib is available
-        try:
-            plt.figure(figsize=(15, 5))
-            
-            # Loss plot
-            plt.subplot(131)
-            plt.plot(self.loss_history)
-            plt.title('Training Loss')
-            plt.xlabel('Training Steps')
-            plt.ylabel('Loss')
-            
-            # Q-value plot
-            plt.subplot(132)
-            plt.plot([stat['mean'] for stat in self.q_values_stats], label='Mean Q')
-            plt.plot([stat['max'] for stat in self.q_values_stats], label='Max Q')
-            plt.plot([stat['min'] for stat in self.q_values_stats], label='Min Q')
-            plt.title('Q-value Evolution')
-            plt.xlabel('Training Steps')
-            plt.ylabel('Q-value')
-            plt.legend()
-            
-            # Action distribution
-            plt.subplot(133)
-            plt.bar(range(self.action_size), self.action_counts)
-            plt.title('Action Distribution')
-            plt.xlabel('Action')
-            plt.ylabel('Count')
-            
-            plt.tight_layout()
-            plt.show()
-            
-        except Exception as e:
-            print(f"Could not create plots: {e}")
-            
-        return {
-            'loss_stats': {
-                'mean': np.mean(self.loss_history) if self.loss_history else None,
-                'min': np.min(self.loss_history) if self.loss_history else None,
-                'max': np.max(self.loss_history) if self.loss_history else None
-            },
-            'q_value_stats': {
-                'mean': np.mean(means) if self.q_values_stats else None,
-                'min': np.min(mins) if self.q_values_stats else None,
-                'max': np.max(maxes) if self.q_values_stats else None
-            },
-            'action_distribution': self.action_counts.tolist(),
-            'most_visited_states': most_visited if self.state_visits else None
-        }
 
 def simulate(learning=True, episode_start=0):
     global agent
@@ -344,32 +213,14 @@ def load_and_play(episode, learning=False):
         agent.model = loaded_model
         agent.update_target_model()
         print(f"Model loaded from {model_path}")
-        
-        # Run diagnostics before simulation
-        print("\nInitial Model Diagnostics:")
-        agent.analyze_diagnostics()
-        
     except Exception as e:
         print(f"Error loading model: {e}")
         return
     
     # Play game
     simulate(learning, episode)
-    
-    # Run diagnostics after simulation
-    print("\nPost-Simulation Diagnostics:")
-    agent.analyze_diagnostics()
 
 if __name__ == "__main__":
-    # Parse command line arguments
-    args = parse_arguments()
-    
-    # Update global constants based on arguments
-    DISPLAY_EPISODES = args.display_every
-    REPORT_EPISODES = args.report_every
-    NUM_EPISODES = args.episodes
-    
-    # Initialize environment
     env = gym.make("Pyrace-v1").unwrapped  # skip the TimeLimit and OrderEnforcing default wrappers
     print('env', type(env))
     
@@ -384,45 +235,17 @@ if __name__ == "__main__":
     # Initialize DQN agent
     agent = DQNAgent(STATE_SIZE, ACTION_SIZE)
     
-    if args.mode == 'train' or args.mode == 'both':
-        print(f"\nStarting training for {NUM_EPISODES} episodes...")
-        simulate(learning=True)
-        
-        # Run diagnostics after training
-        print("\nFinal Training Diagnostics:")
-        agent.analyze_diagnostics()
+    NUM_EPISODES = 35000  # Extended to allow even more learning
+    MAX_T = 2000
     
-    if args.mode == 'eval' or args.mode == 'both':
-        print(f"\nStarting evaluation from checkpoint {args.checkpoint}...")
-        load_and_play(episode=args.checkpoint, learning=False)
-        
-        # Run multiple evaluation episodes
-        total_reward = 0
-        num_eval_episodes = 10
-        
-        print(f"\nRunning {num_eval_episodes} evaluation episodes...")
-        for i in range(num_eval_episodes):
-            obv, _ = env.reset()
-            state = np.array(obv)
-            episode_reward = 0
-            done = False
-            
-            while not done:
-                action = agent.act(state, explore_rate=0.0)  # No exploration during evaluation
-                next_obv, reward, done, _, info = env.step(action)
-                episode_reward += reward
-                state = np.array(next_obv)
-                
-                if args.mode == 'eval':  # Only render if in pure eval mode
-                    env.set_msgs(['EVALUATION',
-                                f'Episode: {i+1}/{num_eval_episodes}',
-                                f'Reward: {episode_reward:.0f}',
-                                f'Checkpoints: {info["check"]}',
-                                f'Distance: {info["dist"]}',
-                                f'Crash: {info["crash"]}'])
-                    env.render()
-            
-            total_reward += episode_reward
-            print(f"Evaluation Episode {i+1}: Reward = {episode_reward:.0f}")
-        
-        print(f"\nAverage Evaluation Reward: {total_reward/num_eval_episodes:.0f}") 
+    # Set to True to train from scratch, False to load a pre-trained model
+    TRAIN_FROM_SCRATCH = False
+    # Set to True to continue training a loaded model, False to just evaluate it
+    CONTINUE_TRAINING = False  # We're now in evaluation mode
+    # Latest episode to load - use your highest available model
+    LATEST_EPISODE = 30000  # Using the latest trained model
+    
+    if TRAIN_FROM_SCRATCH:
+        simulate(learning=True)
+    else:
+        load_and_play(episode=LATEST_EPISODE, learning=CONTINUE_TRAINING) 
