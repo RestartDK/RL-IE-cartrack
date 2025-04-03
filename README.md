@@ -2,6 +2,8 @@
 
 This project implements a Deep Q-Network (DQN) reinforcement learning algorithm to train an agent to navigate a 2D racing environment. The project converts an original Q-table implementation to use a neural network approach.
 
+![Race Car Demo](/videos/demo.mp4)
+
 ## Project Overview
 
 The agent learns to drive a car around a racing track without crashing into walls. The implementation uses:
