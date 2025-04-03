@@ -212,6 +212,7 @@ class PyRace2D:
         if action == 0: self.car.speed += 2
         elif action == 1: self.car.angle += 5
         elif action == 2: self.car.angle -= 5
+        elif action == 3: self.car.speed -= 2
 
         self.car.update()
         self.car.check_collision()

@@ -7,7 +7,7 @@ class RaceEnv(gym.Env):
     metadata = {'render_modes' : ['human'], 'render_fps' : 30}
     def __init__(self, render_mode="human", ):
         print("init")
-        self.action_space = spaces.Discrete(3)
+        self.action_space = spaces.Discrete(4)
         self.observation_space = spaces.Box(np.array([0, 0, 0, 0, 0]), np.array([10, 10, 10, 10, 10]), dtype=int)
         self.is_view = True
         self.pyrace = PyRace2D(self.is_view)
